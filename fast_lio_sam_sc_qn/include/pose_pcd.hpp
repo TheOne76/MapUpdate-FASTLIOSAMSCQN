@@ -42,4 +42,10 @@ inline PosePcd::PosePcd(const nav_msgs::Odometry &odom_in,
     idx_ = idx_in;
 }
 
+inline Eigen::Matrix4f poseEigToMatrix4f(const Eigen::Matrix4d &eig_pose)
+{
+    return eig_pose.cast<float>();
+}
+
+
 #endif

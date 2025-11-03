@@ -32,7 +32,7 @@ struct NanoGICPConfig
     int nano_max_iter_ = 32;
     int nano_ransac_max_iter_ = 5;
     double max_corr_dist_ = 2.0;
-    double icp_score_thr_ = 10.0;
+    double icp_score_thr_ = 0.08;
     double transformation_epsilon_ = 0.01;
     double euclidean_fitness_epsilon_ = 0.01;
     double ransac_outlier_rejection_threshold_ = 1.0;

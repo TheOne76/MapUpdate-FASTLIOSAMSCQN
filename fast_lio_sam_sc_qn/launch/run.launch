@@ -2,8 +2,8 @@
 
 	<arg name="rviz" default="true" />
 	<arg name="lidar" default="ouster" /> <!-- ouster, velodyne, livox, kitti, ... -->
-	<arg name="odom_topic" default="/Odometry" />
-	<arg name="lidar_topic" default="/cloud_registered" />
+	<arg name="odom_topic" default="/robot/dlo/odom_node/odom/keyframe" />
+	<arg name="lidar_topic" default="/robot/dlo/odom_node/pointcloud/keyframe" />
 
 	<!-- visualize -->
 	<!-- <node if="$(arg rviz)" pkg="rviz" type="rviz" name="rviz_lio" args="-d $(find fast_lio_sam_sc_qn)/config/lio_rviz.rviz" launch-prefix="nice"/> -->
@@ -17,7 +17,7 @@
 	</node>
 
 	<!-- run fast_lio -->
-	<include if="$(eval arg ('lidar') == 'ouster')" file="$(find fast_lio)/launch/mapping_ouster64.launch">
+	<!-- <include if="$(eval arg ('lidar') == 'ouster')" file="$(find fast_lio)/launch/mapping_ouster64.launch">
 		<arg name="rviz" value="false"/>
 	</include>
 	<include if="$(eval arg ('lidar') == 'velodyne')" file="$(find fast_lio)/launch/mapping_velodyne.launch">
@@ -43,6 +43,6 @@
 	</include>
 	<include if="$(eval arg ('lidar') == 'vbr-colosseo')" file="$(find fast_lio)/../fastlio_config_launch/vbr-colosseo.launch">
 		<arg name="rviz" value="false"/>
-	</include>
+	</include> -->
 
 </launch>

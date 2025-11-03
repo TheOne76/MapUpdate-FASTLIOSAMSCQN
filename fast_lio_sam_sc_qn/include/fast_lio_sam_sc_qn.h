@@ -45,6 +45,9 @@
 #include "pose_pcd.hpp"
 #include "utilities.hpp"
 
+#include <nano_gicp/point_type_nano_gicp.hpp>
+#include <nano_gicp/nano_gicp.hpp>
+
 namespace fs = std::filesystem;
 using namespace std::chrono;
 typedef message_filters::sync_policies::ApproximateTime<nav_msgs::Odometry, sensor_msgs::PointCloud2> odom_pcd_sync_pol;
@@ -75,6 +78,8 @@ private:
     gtsam::Values corrected_esti_;
     double keyframe_thr_;
     double voxel_res_;
+    double map_voxel_res_;  // New: for voxelizing reference map
+    bool mapupdate_enable_; // New: enable map alignment
     int sub_key_num_;
     std::vector<std::pair<size_t, size_t>> loop_idx_pairs_; // for vis
     ///// visualize
@@ -98,10 +103,18 @@ private:
     std::shared_ptr<message_filters::Subscriber<sensor_msgs::PointCloud2>> sub_pcd_ = nullptr;
     ///// Loop closure
     std::shared_ptr<LoopClosure> loop_closure_;
+    pcl::PointCloud<PointType>::Ptr reference_map_;
+    nano_gicp::NanoGICP<PointType, PointType> nano_gicp_;
+    LoopClosureConfig lc_config_;
+    NanoGICPConfig &gc_;  // reference to the inner GICP config
+
 
 public:
     explicit FastLioSamScQn(const ros::NodeHandle &n_private);
     ~FastLioSamScQn();
+
+    std::string saved_map_path_;
+
 
 private:
     // methods

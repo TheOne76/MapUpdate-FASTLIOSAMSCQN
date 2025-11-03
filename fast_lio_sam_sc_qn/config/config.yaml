@@ -9,13 +9,21 @@ keyframe:
   enable_submap_matching: false               # If it is set to be `true`, submap-level (coarse-to-)fine alignment will be performed
                                               # note: without Quatro, anyway scan-to-submap matching is performed, as that shows better performance
 
-quatro_nano_gicp_voxel_resolution: 0.3        # voxel resolution to use Quatro and Nano-GICP matching
+mapupdate:
+  enable: true
+  saved_map: "/home/manish-d/stack/src/bopt_ndt_ws/localization/maps/3D_map/G1_DOWNSAMPLED_VEHICLE.pcd"
+  voxel_res: 0.1
+
+
+  
+
+quatro_nano_gicp_voxel_resolution: 0.1        # voxel resolution to use Quatro and Nano-GICP matching
 save_voxel_resolution: 0.3                    # voxel resolution to save map in .pcd format
 scancontext_max_correspondence_distance: 35.0 # this is used for candidate trimming after ScanContext
 
 nano_gicp:                                    # all values are from Nano-GICP official github (Direct LiDAR Odometry)
   thread_number: 0                            # if 0, max number of core
-  icp_score_threshold: 1.5                    # lower is more accurate, for loop detection
+  icp_score_threshold: 0.08                    # lower is more accurate, for loop detection
   correspondences_number: 15
   max_correspondence_distance: 35.0           # this is also used for candidate trimming after ScanContext
   max_iter: 32
@@ -33,7 +41,7 @@ quatro:                                       # all values are from Quatro offic
   fpfh_normal_radius: 0.9                     # It should be 2.5 - 3.0 * `quatro_nano_gicp_voxel_resolution`
   fpfh_radius: 1.5                            # It should be 5.0 * `quatro_nano_gicp_voxel_resolution`
   estimating_scale: false
-  noise_bound: 0.3                            # The magnitude of uncertainty of measurements, the best is within v/2 ~ v (v: voxel resol.)
+  noise_bound: 0.1                            # The magnitude of uncertainty of measurements, the best is within v/2 ~ v (v: voxel resol.)
   rotation:
     num_max_iter: 50                          # Usually, rotation estimation converges within < 20 iterations
     gnc_factor: 1.4                           # Control the magnitue of the increase in non-linearity. The larger the value, the steeper the increase in nonlinearity.
