@@ -85,6 +85,7 @@ private:
     ///// visualize
     tf::TransformBroadcaster broadcaster_;
     pcl::PointCloud<pcl::PointXYZ> odoms_, corrected_odoms_;
+    pcl::PointCloud<PointType>::Ptr reference_map_raw_;
     nav_msgs::Path odom_path_, corrected_path_;
     bool global_map_vis_switch_ = true;
     ///// results

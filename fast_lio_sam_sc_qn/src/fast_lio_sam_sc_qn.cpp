@@ -23,16 +23,35 @@ FastLioSamScQn::FastLioSamScQn(const ros::NodeHandle &n_private):
     nh_.param<double>("/mapupdate/voxel_res", map_voxel_res_, 0.25);  // New: Voxel res for reference map
 
 
-    reference_map_ = boost::make_shared<pcl::PointCloud<PointType>>();
+    reference_map_     = boost::make_shared<pcl::PointCloud<PointType>>();
+    reference_map_raw_ = boost::make_shared<pcl::PointCloud<PointType>>();
+
     if (pcl::io::loadPCDFile<PointType>(saved_map_path_, *reference_map_) == -1)
     {
         ROS_ERROR("Failed to load reference map: %s", saved_map_path_.c_str());
-    } else if (!reference_map_->empty() && mapupdate_enable_) {
-        // New: Voxelize reference map for efficiency
-        auto voxelized = voxelizePcd(reference_map_, map_voxel_res_);
-        reference_map_ = voxelized;
-        ROS_INFO("Reference map loaded and voxelized at resolution %.2f", map_voxel_res_);
     }
+    else if (!reference_map_->empty())
+    {
+        /* Keep a RAW (non-downsampled) copy for saving */
+        *reference_map_raw_ = *reference_map_;
+
+        if (mapupdate_enable_)
+        {
+            /* Voxelize ONLY the runtime reference map (for ICP efficiency) */
+            reference_map_ = voxelizePcd(reference_map_, map_voxel_res_);
+
+            ROS_INFO("Reference map loaded: raw=%zu, voxelized=%zu (voxel=%.2f)",
+                    reference_map_raw_->size(),
+                    reference_map_->size(),
+                    map_voxel_res_);
+        }
+        else
+        {
+            ROS_INFO("Reference map loaded (no voxelization), points=%zu",
+                    reference_map_raw_->size());
+        }
+    }
+
     /* ScanContext */
     nh_.param<double>("/scancontext_max_correspondence_distance",
                       lc_config.scancontext_max_correspondence_distance_,
@@ -382,91 +401,133 @@ void FastLioSamScQn::visTimerFunc(const ros::TimerEvent &event)
 
 void FastLioSamScQn::saveFlagCallback(const std_msgs::String::ConstPtr &msg)
 {
-    std::string save_dir = msg->data != "" ? msg->data : package_path_;
+    if (keyframes_.empty())
+    {
+        ROS_WARN("No keyframes available, skipping save.");
+        return;
+    }
 
-    // save scans as individual pcd files and poses in KITTI format
-    // Delete the scans folder if it exists and create a new one
-    std::string seq_directory = save_dir + "/" + seq_name_;
+    std::string save_dir = msg->data.empty() ? package_path_ : msg->data;
+    std::string seq_directory   = save_dir + "/" + seq_name_;
     std::string scans_directory = seq_directory + "/scans";
+
+    /* ================== SAVE SCANS + POSES ================== */
     if (save_in_kitti_format_)
     {
-        ROS_INFO("\033[32;1mScans are saved in %s, following the KITTI and TUM format\033[0m", scans_directory.c_str());
-        if (fs::exists(seq_directory))
+        if (seq_name_.empty())
         {
-            fs::remove_all(seq_directory);
+            ROS_ERROR("seq_name is empty — refusing to delete/create directories.");
+            return;
         }
+
+        if (fs::exists(seq_directory))
+            fs::remove_all(seq_directory);
+
         fs::create_directories(scans_directory);
 
         std::ofstream kitti_pose_file(seq_directory + "/poses_kitti.txt");
         std::ofstream tum_pose_file(seq_directory + "/poses_tum.txt");
         tum_pose_file << "#timestamp x y z qx qy qz qw\n";
+
         {
             std::lock_guard<std::mutex> lock(keyframes_mutex_);
             for (size_t i = 0; i < keyframes_.size(); ++i)
             {
-                // Save the point cloud
-                std::stringstream ss_;
-                ss_ << scans_directory << "/" << std::setw(6) << std::setfill('0') << i << ".pcd";
-                ROS_INFO("Saving %s...", ss_.str().c_str());
-                pcl::io::savePCDFileASCII<PointType>(ss_.str(), keyframes_[i].pcd_);
+                std::stringstream ss;
+                ss << scans_directory << "/"
+                   << std::setw(6) << std::setfill('0') << i << ".pcd";
 
-                // Save the pose in KITTI format
-                const auto &pose_ = keyframes_[i].pose_corrected_eig_;
-                kitti_pose_file << pose_(0, 0) << " " << pose_(0, 1) << " " << pose_(0, 2) << " "
-                                << pose_(0, 3) << " " << pose_(1, 0) << " " << pose_(1, 1) << " "
-                                << pose_(1, 2) << " " << pose_(1, 3) << " " << pose_(2, 0) << " "
-                                << pose_(2, 1) << " " << pose_(2, 2) << " " << pose_(2, 3) << "\n";
+                pcl::io::savePCDFileBinary<PointType>(ss.str(), keyframes_[i].pcd_);
 
-                const auto &lidar_optim_pose_ = poseEigToPoseStamped(keyframes_[i].pose_corrected_eig_);
-                tum_pose_file << std::fixed << std::setprecision(8) << keyframes_[i].timestamp_
-                              << " " << lidar_optim_pose_.pose.position.x << " "
-                              << lidar_optim_pose_.pose.position.y << " "
-                              << lidar_optim_pose_.pose.position.z << " "
-                              << lidar_optim_pose_.pose.orientation.x << " "
-                              << lidar_optim_pose_.pose.orientation.y << " "
-                              << lidar_optim_pose_.pose.orientation.z << " "
-                              << lidar_optim_pose_.pose.orientation.w << "\n";
+                const auto &pose = keyframes_[i].pose_corrected_eig_;
+                kitti_pose_file
+                    << pose(0,0) << " " << pose(0,1) << " " << pose(0,2) << " " << pose(0,3) << " "
+                    << pose(1,0) << " " << pose(1,1) << " " << pose(1,2) << " " << pose(1,3) << " "
+                    << pose(2,0) << " " << pose(2,1) << " " << pose(2,2) << " " << pose(2,3) << "\n";
+
+                auto pose_msg = poseEigToPoseStamped(keyframes_[i].pose_corrected_eig_);
+                tum_pose_file << std::fixed << std::setprecision(8)
+                              << keyframes_[i].timestamp_ << " "
+                              << pose_msg.pose.position.x << " "
+                              << pose_msg.pose.position.y << " "
+                              << pose_msg.pose.position.z << " "
+                              << pose_msg.pose.orientation.x << " "
+                              << pose_msg.pose.orientation.y << " "
+                              << pose_msg.pose.orientation.z << " "
+                              << pose_msg.pose.orientation.w << "\n";
             }
         }
-        kitti_pose_file.close();
-        tum_pose_file.close();
-        ROS_INFO("\033[32;1mScans and poses saved in .pcd and KITTI format\033[0m");
+
+        ROS_INFO("Scans + KITTI/TUM poses saved to %s", seq_directory.c_str());
     }
 
+    /* ================== SAVE ROSBAG ================== */
     if (save_map_bag_)
     {
         rosbag::Bag bag;
         bag.open(package_path_ + "/result.bag", rosbag::bagmode::Write);
+
         {
             std::lock_guard<std::mutex> lock(keyframes_mutex_);
-            for (size_t i = 0; i < keyframes_.size(); ++i)
+            for (const auto &kf : keyframes_)
             {
-                ros::Time time;
-                time.fromSec(keyframes_[i].timestamp_);
-                bag.write("/keyframe_pcd", time, pclToPclRos(keyframes_[i].pcd_, map_frame_));
-                bag.write("/keyframe_pose", time, poseEigToPoseStamped(keyframes_[i].pose_corrected_eig_));
+                ros::Time t;
+                t.fromSec(kf.timestamp_);
+                bag.write("/keyframe_pcd",  t, pclToPclRos(kf.pcd_, map_frame_));
+                bag.write("/keyframe_pose", t, poseEigToPoseStamped(kf.pose_corrected_eig_));
             }
         }
+
         bag.close();
-        ROS_INFO("\033[36;1mResult saved in .bag format!!!\033[0m");
+        ROS_INFO("Rosbag saved successfully.");
     }
 
+    /* ================== SAVE MAP PCD (CORRECTED) ================== */
     if (save_map_pcd_)
     {
-        pcl::PointCloud<PointType>::Ptr corrected_map(new pcl::PointCloud<PointType>());
-        corrected_map->reserve(keyframes_[0].pcd_.size() * keyframes_.size()); // it's an approximated size
+        pcl::PointCloud<PointType>::Ptr corrected_map(
+            new pcl::PointCloud<PointType>());
+
+        corrected_map->reserve(
+            keyframes_[0].pcd_.size() * keyframes_.size());
+
         {
             std::lock_guard<std::mutex> lock(keyframes_mutex_);
-            for (size_t i = 0; i < keyframes_.size(); ++i)
+            for (const auto &kf : keyframes_)
             {
-                *corrected_map += transformPcd(keyframes_[i].pcd_, keyframes_[i].pose_corrected_eig_);
+                *corrected_map += transformPcd(
+                    kf.pcd_,
+                    kf.pose_corrected_eig_);
             }
         }
-        const auto &voxelized_map = voxelizePcd(corrected_map, voxel_res_);
-        pcl::io::savePCDFileASCII<PointType>(seq_directory + "/" + seq_name_ + "_map.pcd", *voxelized_map);
-        ROS_INFO("\033[32;1mAccumulated map cloud saved in .pcd format\033[0m");
+
+        /* Voxelize ONLY corrected SLAM map */
+        pcl::PointCloud<PointType>::Ptr voxelized_corrected_map =
+            voxelizePcd(corrected_map, voxel_res_);
+
+        /* Append reference map WITHOUT voxelization */
+        if (reference_map_ && !reference_map_->empty())
+        {
+            *voxelized_corrected_map += *reference_map_raw_;
+            ROS_INFO("Reference map appended (%zu pts)", reference_map_->size());
+        }
+
+        std::string map_path =
+            seq_directory + "/" + seq_name_ + "_map.pcd";
+
+        if (pcl::io::savePCDFileBinary<PointType>(
+                map_path, *voxelized_corrected_map) == 0)
+        {
+            ROS_INFO("\033[32;1mFinal map saved to %s\033[0m",
+                     map_path.c_str());
+        }
+        else
+        {
+            ROS_ERROR("Failed to save map PCD!");
+        }
     }
 }
+
 
 FastLioSamScQn::~FastLioSamScQn()
 {
@@ -488,39 +549,60 @@ FastLioSamScQn::~FastLioSamScQn()
         bag.close();
         ROS_INFO("\033[36;1mResult saved in .bag format!!!\033[0m");
     }
+    /* ================== SAVE MAP PCD ================== */
     if (save_map_pcd_)
     {
-        // 1. Create corrected map from keyframes
-        pcl::PointCloud<PointType>::Ptr corrected_map(new pcl::PointCloud<PointType>());
-        corrected_map->reserve(keyframes_[0].pcd_.size() * keyframes_.size()); // approximate size
+        if (keyframes_.empty())
+        {
+            ROS_WARN("No keyframes available, skipping map PCD save.");
+            return;
+        }
+
+        // 1. Build corrected map from keyframes ONLY
+        pcl::PointCloud<PointType>::Ptr corrected_map(
+            new pcl::PointCloud<PointType>());
+
+        corrected_map->reserve(
+            keyframes_[0].pcd_.size() * keyframes_.size());
 
         {
             std::lock_guard<std::mutex> lock(keyframes_mutex_);
             for (size_t i = 0; i < keyframes_.size(); ++i)
             {
-                *corrected_map += transformPcd(keyframes_[i].pcd_, keyframes_[i].pose_corrected_eig_);
+                *corrected_map += transformPcd(
+                    keyframes_[i].pcd_,
+                    keyframes_[i].pose_corrected_eig_);
             }
         }
 
-        // 2. Concatenate reference map if it exists
+        // 2. Voxelize ONLY the corrected keyframe map
+        pcl::PointCloud<PointType>::Ptr voxelized_corrected_map =
+            voxelizePcd(corrected_map, voxel_res_);
+
+        ROS_INFO("Voxelized corrected map points: %zu",
+                voxelized_corrected_map->size());
+
+        // 3. Append reference map WITHOUT voxelization
         if (reference_map_ && !reference_map_->empty())
         {
-            *corrected_map += *reference_map_;
-            ROS_INFO("Reference map concatenated with corrected keyframes map.");
+            *voxelized_corrected_map += *reference_map_raw_;
+            ROS_INFO("Reference map appended (not voxelized), points: %zu",
+                    reference_map_->size());
         }
 
-        // 3. Voxelize the combined map
-        auto voxelized_map = voxelizePcd(corrected_map, voxel_res_);
-        ROS_INFO("Voxelized map points: %zu", voxelized_map->size());
-
-        // 4. Save to PCD in binary format
+        // 4. Save final map
         std::string save_path = package_path_ + "/result.pcd";
-        if (pcl::io::savePCDFileBinary<PointType>(save_path, *voxelized_map) == 0)
-            ROS_INFO("\033[32;1mResult saved in .pcd binary format at %s!!!\033[0m", save_path.c_str());
+        if (pcl::io::savePCDFileBinary<PointType>(
+                save_path, *voxelized_corrected_map) == 0)
+        {
+            ROS_INFO("\033[32;1mResult saved in .pcd binary format at %s\033[0m",
+                    save_path.c_str());
+        }
         else
+        {
             ROS_ERROR("Failed to save result.pcd!");
+        }
     }
-
 }
 
 void FastLioSamScQn::updateOdomsAndPaths(const PosePcd &pose_pcd_in)

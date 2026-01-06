@@ -11,8 +11,8 @@ keyframe:
 
 mapupdate:
   enable: true
-  saved_map: "/home/manish-d/stack/src/bopt_ndt_ws/localization/maps/3D_map/G1_DOWNSAMPLED_VEHICLE.pcd"
-  voxel_res: 0.1
+  saved_map: "/home/manish-d/MapUpdate/src/MapUpdate-FASTLIOSAMSCQN/fast_lio_sam_sc_qn/inputpcd/G4.pcd"
+  voxel_res: 0.02
 
 
   
